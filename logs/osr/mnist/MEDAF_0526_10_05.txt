@@ -1,0 +1,2 @@
+SPLIT[1|5] => Accuracy: [99.654], AUROC: [0.975], AUPR_IN: [0.975], AUPR_OUT: [0.974], F1-score: [0.921]
+SPLIT[2|5] => Accuracy: [99.343], AUROC: [0.981], AUPR_IN: [0.983], AUPR_OUT: [0.978], F1-score: [0.932]
