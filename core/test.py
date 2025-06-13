@@ -42,7 +42,7 @@ def evaluation(model, test_loader, out_loader, **options):
     
     with torch.no_grad():
         for data, labels in test_loader:
-            data, labels = data, labels
+            data, labels = data.cuda(), labels.cuda()
             batch_size = labels.size(0)
             output_dict = model(data, return_ft=True)
             logits_list = output_dict['logits']
@@ -85,7 +85,7 @@ def evaluation(model, test_loader, out_loader, **options):
                 n += 1
             pred_open.append(softmax_list[options['branch_opt']].data.cpu().numpy())
             labels_open.append((torch.zeros_like(labels) - 1).cpu().numpy())
-    import pdb;pdb.set_trace()
+    # import pdb;pdb.set_trace()
 
     acc = float(correct) * 100. / float(total)
 
@@ -105,7 +105,7 @@ def evaluation(model, test_loader, out_loader, **options):
     total_score = np.concatenate([score_close, score_open], axis=0)
 
     # Threshold determination
-    import pdb;pdb.set_trace()
+    # import pdb;pdb.set_trace()
     open_labels_bin = (open_labels[:n].cpu().numpy() != -1).astype(int)  # 1 = known, 0 = unknown
     prob = probs[:n].reshape(-1, 1)
     fpr, tpr, thresholds = roc_curve(open_labels_bin, prob)
@@ -125,7 +125,7 @@ def evaluation(model, test_loader, out_loader, **options):
     aupr_in = auc(recall, precision)
     precision, recall, _ = precision_recall_curve(1 - open_labels_bin, -prob)
     aupr_out = auc(recall, precision)
-    import pdb;pdb.set_trace()
+    # import pdb;pdb.set_trace()
 
     # ---------- Additional analysis ----------
     # Separate scores
