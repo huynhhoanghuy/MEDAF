@@ -234,3 +234,128 @@ class MultiBranchNet(nn.Module):
         elif prefix in ['classifier']:
             return classifier_params
         
+
+
+
+def conv1x1(in_planes, out_planes, stride=1):
+    return nn.Conv2d(in_planes, out_planes, kernel_size=1, stride=stride, padding=0, bias=False)
+
+
+class Classifier(nn.Module):
+    def __init__(self, in_dim, out_dim, bias=False):
+        super().__init__()
+        self.fc = nn.Linear(in_dim, out_dim, bias=bias)
+
+    def forward(self, x):
+        return self.fc(x)
+
+
+class ResidualBlock(nn.Module):
+    def __init__(self, in_channels, out_channels):
+        super().__init__()
+        self.block = nn.Sequential(
+            nn.Conv2d(in_channels, out_channels, 3, padding=1, bias=False),
+            nn.BatchNorm2d(out_channels),
+            nn.LeakyReLU(inplace=True),
+            nn.Conv2d(out_channels, out_channels, 3, padding=1, bias=False),
+            nn.BatchNorm2d(out_channels),
+        )
+        self.skip = nn.Identity() if in_channels == out_channels else conv1x1(in_channels, out_channels)
+
+    def forward(self, x):
+        return F.relu(self.block(x) + self.skip(x))
+
+
+class Expert(nn.Module):
+    def __init__(self, in_channels, feature_dim, num_classes):
+        super().__init__()
+        self.res_block = ResidualBlock(in_channels, feature_dim)
+        self.cls = conv1x1(feature_dim, num_classes)
+
+    def forward(self, x):
+        feat = self.res_block(x)
+        cam = self.cls(feat)
+        logits = F.adaptive_avg_pool2d(cam, 1).view(x.size(0), -1)
+        return logits, cam
+
+
+class MultiExpertDynamicNet(nn.Module):
+    def __init__(self, args, in_channels, num_classes, num_experts=30, gate_temp=1.0):
+        super().__init__()
+        backbone, feature_dim, self.cam_size = build_backbone(img_size=args['img_size'],
+                                                              backbone_name=args['backbone'], 
+                                                              projection_dim=-1, 
+                                                              inchan=3)
+        # in_channels = args['in_channels']
+        self.num_experts = num_experts
+        self.num_classes = num_classes
+        self.feature_dim = feature_dim
+        self.gate_temp = gate_temp
+
+        # Shared backbone
+        self.shared = nn.Sequential(
+            nn.Conv2d(in_channels, 64, 3, padding=1),
+            nn.BatchNorm2d(64),
+            nn.LeakyReLU(),
+            ResidualBlock(64, feature_dim),
+        )
+
+        # Experts
+        self.experts = nn.ModuleList([
+            Expert(feature_dim, feature_dim, num_classes) for _ in range(num_experts)
+        ])
+
+        # Gate network
+        self.gate_net = nn.Sequential(
+            nn.AdaptiveAvgPool2d(1),
+            nn.Flatten(),
+            Classifier(feature_dim, feature_dim // 2),
+            nn.ReLU(),
+            Classifier(feature_dim // 2, num_experts)
+        )
+
+    def forward(self, x, y=None, return_ft=False):
+        shared_feat = self.shared(x)                      # [B, C, H, W]
+        gate_logits = self.gate_net(shared_feat)          # [B, E]
+        gate_weights = F.softmax(gate_logits / self.gate_temp, dim=1)  # [B, E]
+
+        logits_list = []
+        cams_list = []
+
+        for i in range(self.num_experts):
+            logits_i, cam_i = self.experts[i](shared_feat)   # [B, C], [B, C, H, W]
+            logits_list.append(logits_i.unsqueeze(-1))       # [B, C, 1]
+            if y is not None:
+                cams_list.append(
+                    cam_i.gather(1, y[:, None, None, None].expand(-1, 1, cam_i.size(2), cam_i.size(3)))
+                )
+
+        logits_stack = torch.cat(logits_list, dim=-1)     # [B, C, E]
+        gate_weights = gate_weights.unsqueeze(1)          # [B, 1, E]
+        logits_fused = torch.sum(logits_stack * gate_weights, dim=-1)  # [B, C]
+
+        output = {
+            'logits': [log.squeeze(-1) for log in logits_list] + [logits_fused],
+            'gate_pred': gate_weights.squeeze(1)
+        }
+
+        if y is not None:
+            output['cams'] = torch.cat(cams_list, dim=1)  # [B, E, H, W] nếu cần
+
+        if return_ft:
+            # tổng CAM các expert nếu cần cho scoring
+            output['fts'] = sum([cam.detach() for _, cam in [self.experts[i](shared_feat) for i in range(self.num_experts)]])
+
+        return output
+
+    def get_params(self, prefix='extractor'):
+        shared_params = list(self.shared.parameters())
+        expert_params = [p for expert in self.experts for p in expert.parameters()]
+        gate_params = list(self.gate_net.parameters())
+
+        if prefix == 'extractor':
+            return shared_params + expert_params
+        elif prefix == 'classifier':
+            all_params = list(self.parameters())
+            extractor_ids = set(map(id, shared_params + expert_params))
+            return filter(lambda p: id(p) not in extractor_ids, all_params)

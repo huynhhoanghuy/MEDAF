@@ -63,7 +63,7 @@ def main(options):
     options['test_f1_keys']    = ['f1', 'f2', 'f3', 'fGate']
     options['test_acc_keys']   = ['tacc1', 'tacc2', 'tacc3', 'taccGate']
     options['test_auroc_keys'] = ['auroc1', 'auroc2', 'auroc3', 'aurocGate']
-    
+    import pdb;pdb.set_trace()
     if options['split'] == 'AUROC':
         splits = splits_AUROC
     elif options['split'] == 'F1':
@@ -98,7 +98,7 @@ def main(options):
 
 
 def trainLoop(options):
-    
+    import pdb;pdb.set_trace()
     train_loader, test_loader, out_loader = getLoader(options)
     now_time = datetime.datetime.now().strftime("%m%d_%H:%M")
     ckpt_path = './ckpt/osr' + '/' + options['dataset'] + '/' + now_time
@@ -136,6 +136,8 @@ def trainLoop(options):
         scheduler.load_state_dict(checkpoint_dict['scheduler'])
 
     for epoch in range(epoch_start, options['epoch_num']):
+        print("---------------f--------------")
+        import pdb;pdb.set_trace()
         lr = optimizer.param_groups[0]['lr']
         print(f"\nEpoch: [{epoch+1:d} | {options['epoch_num']:d}] LR: {lr:f}")
         train_loss = train(train_loader, model, criterion, optimizer, args=options)
@@ -150,6 +152,7 @@ def trainLoop(options):
                 'optimizer': optimizer.state_dict(),
                 'scheduler': scheduler.state_dict()
                 }, checkpoint=ckpt_path, filename=f"epoch_{epoch+1}.pth")
+            import pdb;pdb.set_trace()
             if (epoch + 1) != options['save_step']:
                 last_log_path=f"{ckpt_path}/epoch_{epoch+1-options['save_step']}.pth"
                 if(os.path.exists(last_log_path)):
@@ -161,6 +164,8 @@ def trainLoop(options):
 
 
 if __name__ == '__main__':
+    import pdb;pdb.set_trace()
+    print("++==============++++++++")
     cudnn.benchmark = True
     options = get_config('osr')
     set_seeding(options['seed'])
