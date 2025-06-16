@@ -63,7 +63,7 @@ def main(options):
     options['test_f1_keys']    = ['f1', 'f2', 'f3', 'fGate']
     options['test_acc_keys']   = ['tacc1', 'tacc2', 'tacc3', 'taccGate']
     options['test_auroc_keys'] = ['auroc1', 'auroc2', 'auroc3', 'aurocGate']
-    import pdb;pdb.set_trace()
+    # import pdb;pdb.set_trace()
     if options['split'] == 'AUROC':
         splits = splits_AUROC
     elif options['split'] == 'F1':
@@ -98,7 +98,7 @@ def main(options):
 
 
 def trainLoop(options):
-    import pdb;pdb.set_trace()
+    # import pdb;pdb.set_trace()
     train_loader, test_loader, out_loader = getLoader(options)
     now_time = datetime.datetime.now().strftime("%m%d_%H:%M")
     ckpt_path = './ckpt/osr' + '/' + options['dataset'] + '/' + now_time
@@ -137,7 +137,7 @@ def trainLoop(options):
 
     for epoch in range(epoch_start, options['epoch_num']):
         print("---------------f--------------")
-        import pdb;pdb.set_trace()
+        
         lr = optimizer.param_groups[0]['lr']
         print(f"\nEpoch: [{epoch+1:d} | {options['epoch_num']:d}] LR: {lr:f}")
         train_loss = train(train_loader, model, criterion, optimizer, args=options)
@@ -146,13 +146,13 @@ def trainLoop(options):
         scheduler.step()
         
         if (epoch + 1) % options['save_step'] == 0:
+            # import pdb;pdb.set_trace()
             save_checkpoint({
                 'epoch': epoch + 1,
                 'state_dict': model.module.state_dict(),
                 'optimizer': optimizer.state_dict(),
                 'scheduler': scheduler.state_dict()
                 }, checkpoint=ckpt_path, filename=f"epoch_{epoch+1}.pth")
-            import pdb;pdb.set_trace()
             if (epoch + 1) != options['save_step']:
                 last_log_path=f"{ckpt_path}/epoch_{epoch+1-options['save_step']}.pth"
                 if(os.path.exists(last_log_path)):
@@ -160,11 +160,40 @@ def trainLoop(options):
     
     result_list = evaluation(model, test_loader, out_loader, **options)    
     print("\D-O-N-E!/ =>\nLast ACC:", result_list[0], " Last AUROC:", result_list[1]," Last F1-score:", result_list[4])
+    
+    print("###### PRUNING")
+    # Average gate weights over training set (example with loader)
+    def get_expert_utilities(model, dataloader):
+        model.eval()
+        expert_weights = []
+
+        with torch.no_grad():
+            for x, _ in dataloader:
+                x = x.cuda()
+                gate_pred = model(x)['gate_pred']  # [B, E]
+                expert_weights.append(gate_pred.mean(dim=0).cpu())
+
+        avg_weights = torch.stack(expert_weights).mean(dim=0)  # [E]
+        return avg_weights
+
+    # Gọi sau khi training
+    avg_weights = get_expert_utilities(model.module, train_loader)
+    topk = avg_weights.topk(k=2).indices.tolist()  # giữ lại 10 expert quan trọng nhất
+    model.module.prune_experts(topk)
+
+    # Evaluate lại
+    acc, auroc, aupr_in, aupr_out, f1 = evaluation(model.cuda(), test_loader, out_loader, **options)
+    print(f"After Prune - ACC: {acc:.2f}, AUROC: {auroc:.4f}, F1: {f1:.4f}")
+
+    # Save lại
+    torch.save(model.state_dict(), f"{ckpt_path}/epoch_{epoch+1-options['save_step']}_pruned.pth")
+
+
     return result_list
 
 
 if __name__ == '__main__':
-    import pdb;pdb.set_trace()
+    # import pdb;pdb.set_trace()
     print("++==============++++++++")
     cudnn.benchmark = True
     options = get_config('osr')

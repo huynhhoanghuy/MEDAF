@@ -359,3 +359,18 @@ class MultiExpertDynamicNet(nn.Module):
             all_params = list(self.parameters())
             extractor_ids = set(map(id, shared_params + expert_params))
             return filter(lambda p: id(p) not in extractor_ids, all_params)
+    
+    def prune_experts(self, keep_indices):
+        """
+        keep_indices: list of indices (int) of experts to keep.
+        """
+        # import pdb; pdb.set_trace()
+        self.experts = nn.ModuleList([self.experts[i] for i in keep_indices])
+        self.num_experts = len(keep_indices)
+
+        # Update final linear layer in gate network
+        input_dim = self.gate_net[-3].fc.out_features  # lấy từ FC trước ReLU
+        self.gate_net[-1] = Classifier(input_dim, len(keep_indices), bias=True)
+
+
+

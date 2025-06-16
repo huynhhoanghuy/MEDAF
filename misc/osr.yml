@@ -15,9 +15,9 @@ id_set     : "cifar10"
 ood_set    : "svhn"        
 
 num_workers: 2
-epoch_num  : 10              
+epoch_num  : 4              
 batch_size : 128              
-save_step  : 10               
+save_step  : 2               
 test_step  : 1               
 backbone   : "resnet18"   
 
